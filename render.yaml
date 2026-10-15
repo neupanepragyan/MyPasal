@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: pasal
+    runtime: node
+    plan: starter # persistent disks need a paid instance
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    disk:
+      name: shop-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATA_DIR
+        value: /var/data
+      - key: TZ
+        value: Asia/Kathmandu
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: APP_PIN
+        sync: false
