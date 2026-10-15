@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { MissingProductError, recordEntry } from "@/lib/entries";
 import { UNITS, type Kind, type Line } from "@/lib/common";
-import { advise, parseStock } from "@/lib/gemma";
+import { advise, readEntry } from "@/lib/gemma";
 import { productStats, shopDataForAdvisor } from "@/lib/stats";
 import {
   SESSION_COOKIE,
@@ -48,11 +48,10 @@ export async function logout() {
 
 // ---------- read a photo or text with Gemma ----------
 
-export type ParseResult = { ok: true; lines: Line[] } | { ok: false; error: string };
+export type ParseResult = { ok: true; kind: Kind; lines: Line[] } | { ok: false; error: string };
 
-export async function parseEntry(kind: Kind, form: FormData): Promise<ParseResult> {
+export async function parseEntry(form: FormData): Promise<ParseResult> {
   await requireAuth();
-  kind = KindSchema.parse(kind);
 
   const text = String(form.get("text") ?? "").trim().slice(0, 2000);
   const photo = form.get("photo");
@@ -65,13 +64,14 @@ export async function parseEntry(kind: Kind, form: FormData): Promise<ParseResul
   if (!text && !image) return { ok: false, error: "Add a photo or type what happened." };
 
   const catalog = productStats();
-  let items;
+  let entry;
   try {
-    items = await parseStock(kind, { text, image }, catalog);
+    entry = await readEntry({ text, image }, catalog);
   } catch (err) {
     console.error("parseEntry failed", err);
     return { ok: false, error: AI_ERROR };
   }
+  const { kind, items } = entry;
   if (items.length === 0) {
     return { ok: false, error: "Couldn't find any products in that. Try a clearer photo or more detail." };
   }
@@ -89,7 +89,7 @@ export async function parseEntry(kind: Kind, form: FormData): Promise<ParseResul
       salePrice: 0,
     };
   });
-  return { ok: true, lines };
+  return { ok: true, kind, lines };
 }
 
 // ---------- save a reviewed entry ----------
@@ -159,7 +159,7 @@ export async function updateProduct(id: number, _prev: string | null, form: Form
     throw err;
   }
   revalidatePath("/", "layout");
-  redirect("/");
+  redirect("/stock");
 }
 
 // ---------- ask the advisor ----------

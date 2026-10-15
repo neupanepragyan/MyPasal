@@ -79,13 +79,35 @@ export function insights(rows: ProductStats[]) {
     .sort((a, b) => b.stock * b.cost_price - a.stock * a.cost_price);
 
   return {
-    revenue: rows.reduce((sum, p) => sum + p.revenue_30, 0),
-    profit: rows.reduce((sum, p) => sum + p.profit_30, 0),
     stockValue: rows.reduce((sum, p) => sum + Math.max(0, p.stock) * p.cost_price, 0),
     reorder,
     bestSellers,
     notSelling,
   };
+}
+
+export type DayPoint = { day: string; revenue: number; profit: number };
+
+/** Revenue and profit per local day for the last `days` days, oldest first; quiet days are 0. */
+export function dailySales(days = 30): DayPoint[] {
+  const keys = Array.from({ length: days }, (_, i) => localDay(Date.now() - (days - 1 - i) * 86_400_000));
+  const rows = db()
+    .prepare(
+      `SELECT date(e.created_at, 'localtime') AS day,
+         SUM(-m.qty * m.unit_price) AS revenue,
+         SUM(-m.qty * (m.unit_price - m.unit_cost)) AS profit
+       FROM entries e JOIN movements m ON m.entry_id = e.id
+       WHERE e.kind = 'sale' AND date(e.created_at, 'localtime') >= ?
+       GROUP BY day`,
+    )
+    .all(keys[0]) as DayPoint[];
+  const byDay = new Map(rows.map((r) => [r.day, r]));
+  return keys.map((day) => ({ day, revenue: byDay.get(day)?.revenue ?? 0, profit: byDay.get(day)?.profit ?? 0 }));
+}
+
+/** YYYY-MM-DD in the server's time zone (TZ), the same days SQLite's 'localtime' gives. */
+function localDay(ms: number) {
+  return new Date(ms).toLocaleDateString("en-CA");
 }
 
 /** Compact text table for the advisor prompt. */

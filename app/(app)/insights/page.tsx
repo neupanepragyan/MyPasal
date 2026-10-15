@@ -1,21 +1,35 @@
 import Link from "next/link";
 import { money, qty } from "@/lib/common";
-import { daysLeft, insights, productStats, type ProductStats } from "@/lib/stats";
+import { dailySales, daysLeft, insights, productStats, type ProductStats } from "@/lib/stats";
 import { AskBox } from "@/components/ask-box";
+import { BarChart } from "@/components/bar-chart";
 
 export default function InsightsPage() {
   const rows = productStats();
-  const { revenue, profit, stockValue, reorder, bestSellers, notSelling } = insights(rows);
+  const { reorder, bestSellers, notSelling } = insights(rows);
+  const days = dailySales(30);
+  const revenue = days.reduce((sum, d) => sum + d.revenue, 0);
+  const profit = days.reduce((sum, d) => sum + d.profit, 0);
+  // Not just revenue: a sale at Rs 0 still has a loss worth charting.
+  const noSales = days.every((d) => d.revenue === 0 && d.profit === 0);
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold tracking-tight">Insights</h1>
 
-      <div className="grid grid-cols-3 gap-2">
-        <Stat label="Sales, 30 days" value={money(revenue)} />
-        <Stat label="Profit, 30 days" value={money(profit)} />
-        <Stat label="Stock value" value={money(stockValue)} />
-      </div>
+      <ChartCard title="Revenue" value={money(revenue)} note="last 30 days" empty={noSales}>
+        <BarChart label="Daily revenue, last 30 days" mode="revenue" points={days.map((d) => ({ day: d.day, value: d.revenue }))} />
+      </ChartCard>
+
+      <ChartCard
+        title="Profit or loss"
+        value={`${money(Math.abs(profit))} ${profit < 0 ? "loss" : "profit"}`}
+        note="last 30 days, after cost of goods"
+        empty={noSales}
+        legend
+      >
+        <BarChart label="Daily profit or loss, last 30 days" mode="profit" points={days.map((d) => ({ day: d.day, value: d.profit }))} />
+      </ChartCard>
 
       <AskBox />
 
@@ -52,12 +66,44 @@ export default function InsightsPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function ChartCard({
+  title,
+  value,
+  note,
+  empty,
+  legend,
+  children,
+}: {
+  title: string;
+  value: string;
+  note: string;
+  empty: boolean;
+  legend?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-2xl bg-white p-3">
-      <p className="text-xs text-stone-500">{label}</p>
-      <p className="mt-1 font-semibold">{value}</p>
-    </div>
+    <section className="rounded-2xl bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium text-stone-500">{title}</h2>
+          <p className="text-2xl font-semibold tracking-tight">{value}</p>
+          <p className="text-xs text-stone-500">{note}</p>
+        </div>
+        {legend && !empty && (
+          <ul className="flex shrink-0 gap-3 pt-1 text-xs text-stone-600">
+            <li className="flex items-center gap-1.5">
+              <span className="size-2.5 rounded-sm bg-emerald-600" /> Profit
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="size-2.5 rounded-sm bg-red-600" /> Loss
+            </li>
+          </ul>
+        )}
+      </div>
+      <div className="mt-8">
+        {empty ? <p className="text-sm text-stone-500">No sales in the last 30 days yet.</p> : children}
+      </div>
+    </section>
   );
 }
 

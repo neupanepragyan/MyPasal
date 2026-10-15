@@ -5,30 +5,34 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { db } from "./db.ts";
-import { extractItems } from "./gemma.ts";
+import { extractEntry } from "./gemma.ts";
 import { MissingProductError, recordEntry } from "./entries.ts";
-import { daysLeft, insights, productStats } from "./stats.ts";
+import { dailySales, daysLeft, insights, productStats } from "./stats.ts";
 
 const dir = mkdtempSync(path.join(tmpdir(), "pasal-test-"));
 process.env.DATA_DIR = dir; // db() opens lazily, so this lands before first use
 after(() => rmSync(dir, { recursive: true, force: true }));
 
-test("extractItems tolerates prose, fences and sloppy types, and drops unusable items", () => {
+test("extractEntry tolerates prose, fences and sloppy types, and drops unusable items", () => {
   const reply = `Here you go:
 \`\`\`json
-{"items":[
+{"kind":"in","items":[
   {"product_id":"3","name":"Wai Wai","qty":"2","unit":"packet","unit_price":null},
   {"name":"","qty":1},
   {"product_id":null,"name":"Sugar","qty":0,"unit":"kg"},
   {"product_id":null,"name":"Basmati Rice","qty":25,"unit":"kg","unit_price":3250,"line_total":3250}
 ]}
 \`\`\``;
-  assert.deepEqual(extractItems(reply), [
-    { product_id: 3, name: "Wai Wai", qty: 2, unit: "pcs", unit_price: null },
-    // A printed line total beats the model's own (wrong) division.
-    { product_id: null, name: "Basmati Rice", qty: 25, unit: "kg", unit_price: 130 },
-  ]);
-  assert.throws(() => extractItems("Sorry, I can't read that."));
+  assert.deepEqual(extractEntry(reply, "sale"), {
+    kind: "in",
+    items: [
+      { product_id: 3, name: "Wai Wai", qty: 2, unit: "pcs", unit_price: null },
+      // A printed line total beats the model's own (wrong) division.
+      { product_id: null, name: "Basmati Rice", qty: 25, unit: "kg", unit_price: 130 },
+    ],
+  });
+  assert.equal(extractEntry('{"kind":"refund","items":[]}', "sale").kind, "sale", "unknown kind falls back");
+  assert.throws(() => extractEntry("Sorry, I can't read that.", "sale"));
 });
 
 test("stock, prices and profit follow the movement ledger", () => {
@@ -54,6 +58,11 @@ test("stock, prices and profit follow the movement ledger", () => {
   const summary = insights(productStats());
   assert.deepEqual(summary.reorder.map((r) => r.id), [id]);
   assert.equal(summary.stockValue, 25 * 20);
+
+  const week = dailySales(7);
+  assert.equal(week.length, 7);
+  assert.deepEqual(week.at(-1), { day: week.at(-1)!.day, revenue: 250, profit: 70 }, "today's sale lands on the last day");
+  assert.ok(week.slice(0, -1).every((d) => d.revenue === 0 && d.profit === 0));
 
   // A bad line rolls back the whole entry.
   const entriesBefore = db().prepare("SELECT COUNT(*) AS n FROM entries").get();

@@ -52,38 +52,44 @@ const Item = z.object({
 }));
 export type ParsedItem = z.output<typeof Item>;
 
-/** Pulls the JSON object out of a reply that may be wrapped in prose or ``` fences. */
-export function extractItems(reply: string): ParsedItem[] {
+export type ParsedEntry = { kind: Kind; items: ParsedItem[] };
+
+/**
+ * Pulls the JSON object out of a reply that may be wrapped in prose or ``` fences.
+ * fallbackKind is used when the model doesn't say (or says something invalid).
+ */
+export function extractEntry(reply: string, fallbackKind: Kind): ParsedEntry {
   const start = reply.indexOf("{");
   const end = reply.lastIndexOf("}");
   if (start < 0 || end < start) throw new Error("No JSON in model reply");
-  const raw = JSON.parse(reply.slice(start, end + 1)) as { items?: unknown };
+  const raw = JSON.parse(reply.slice(start, end + 1)) as { kind?: unknown; items?: unknown };
   if (!Array.isArray(raw.items)) throw new Error("Model reply has no items array");
-  return raw.items.flatMap((item) => {
-    const parsed = Item.safeParse(item);
-    return parsed.success ? [parsed.data] : [];
-  });
+  return {
+    kind: raw.kind === "in" || raw.kind === "sale" ? raw.kind : fallbackKind,
+    items: raw.items.flatMap((item) => {
+      const parsed = Item.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  };
 }
-
-const KIND_CONTEXT: Record<Kind, string> = {
-  in: "This is stock that ARRIVED at the shop (a delivery or supplier bill). Prices are what the shop PAID per unit.",
-  sale: "These are items the shop SOLD to customers. Prices are SELLING prices per unit.",
-};
 
 type CatalogEntry = { id: number; name: string; unit: string };
 
-export async function parseStock(
-  kind: Kind,
+/** Reads a photo and/or text, decides whether it is stock arriving or a sale, and lists the items. */
+export async function readEntry(
   input: { text: string; image?: { mimeType: string; data: string } },
   catalog: CatalogEntry[],
-): Promise<ParsedItem[]> {
+): Promise<ParsedEntry> {
   const system = `You turn a small shop's notes into structured data. The shop is in Nepal and prices are in Nepalese rupees (Rs).
 Input may be a photo (of products, a bill, or a handwritten list) and/or text in English, Nepali, Hindi or a mix. Text is often voice-typed, so expect misspellings.
 
-${KIND_CONTEXT[kind]}
+First decide the kind:
+- "in": stock ARRIVED at the shop. A supplier bill or invoice, a delivery, or words like got, came, arrived, bought, purchased, aayo, kineko, ल्याएँ. Prices are what the shop PAID.
+- "sale": the shop SOLD items to customers. Words like sold, becheko, bikri, बिक्री, or a customer receipt from this shop. Prices are SELLING prices.
+- If it is unclear: a photo is "in", text is "sale".
 
 Reply with ONLY a JSON object, no other text, in exactly this shape:
-{"items":[{"product_id":number|null,"name":string,"qty":number,"unit":${UNITS.map((u) => `"${u}"`).join("|")},"unit_price":number|null,"line_total":number|null}]}
+{"kind":"in"|"sale","items":[{"product_id":number|null,"name":string,"qty":number,"unit":${UNITS.map((u) => `"${u}"`).join("|")},"unit_price":number|null,"line_total":number|null}]}
 
 Rules:
 - One item per distinct product.
@@ -92,7 +98,7 @@ Rules:
 - line_total is the amount for the whole line exactly as written (e.g. 1080), or null if none.
 - unit_price is the price of ONE unit if stated, or null.
 - Ignore anything that is not a product: totals, tax, discounts, shop names, dates, phone numbers.
-- If nothing is recognisable, return {"items":[]}.
+- If nothing is recognisable, return {"kind":"sale","items":[]}.
 
 Catalog (id | name | unit):
 ${catalog.map((p) => `${p.id} | ${p.name} | ${p.unit}`).join("\n") || "(empty)"}`;
@@ -101,7 +107,7 @@ ${catalog.map((p) => `${p.id} | ${p.name} | ${p.unit}`).join("\n") || "(empty)"}
   if (input.image) parts.push({ inlineData: input.image });
   parts.push({ text: input.text || "Read the items in this photo." });
 
-  return extractItems(await generate(system, parts));
+  return extractEntry(await generate(system, parts), input.image ? "in" : "sale");
 }
 
 export async function advise(question: string, shopData: string) {

@@ -1,6 +1,10 @@
 # Pasal
 
-Stock and sales for a small shop. Snap a photo of new stock or a supplier bill, or say what you sold using the phone keyboard's mic. Gemma (via Google AI Studio) reads it, you check it, and the stock updates. Insights shows what to reorder, what sells, and what's sitting idle. You can also ask Gemma for advice.
+Stock and sales for a small shop. Three tabs:
+
+- **Record**: type, speak (Audio tab) or snap a photo of what happened. Gemma (via Google AI Studio) reads it and works out whether it's a sale or stock coming in. You check the items, flip Sale / Stock in if it guessed wrong, and save. Recent entries show below with Undo.
+- **Stock**: what's left, what's running low, and what the stock is worth.
+- **Insights**: daily revenue and profit/loss charts for 30 days, Ask Gemma, then what to reorder, best sellers, and stock that isn't selling.
 
 Your data stays in one SQLite file (`data/shop.db`). Only photos, notes and questions go to Gemma.
 
@@ -26,6 +30,7 @@ Open http://localhost:3000. On a computer, a QR code shows the address to open o
 ## How it works
 
 - **Stock is a ledger.** `movements` holds +qty for stock in and −qty for sales. Stock is their sum, so it never drifts, and **Undo** in History deletes an entry and its movements.
+- **Audio** uses the browser's speech recognition (Chrome, Safari) because Gemma on AI Studio doesn't accept audio. It needs HTTPS or localhost; on plain shop Wi-Fi the Audio tab points you to the keyboard mic instead.
 - **AI suggests, the owner confirms.** Gemma's reply is validated (`lib/gemma.ts`) and shown for review. Nothing is saved until you press Save.
 - **Profit uses the cost at the time of sale**, not today's cost.
 - **Security:** a PIN unlocks each device for a year. Changing `APP_PIN` signs everyone out. Ten wrong PINs in 15 minutes lock login (devices already signed in keep working). Every server action checks the session.
